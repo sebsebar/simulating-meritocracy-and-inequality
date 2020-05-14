@@ -1,0 +1,2195 @@
+---
+title: "Social and cultural dynamics exam"
+author: "Sebastian Scott Engen"
+date: "20/5/2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#Loading Libraries
+library(tidyverse)
+library(cowplot)
+library(reshape2)
+```
+
+#The Orginal Article
+https://arxiv.org/abs/1802.07068 
+
+################## MODELS #############################
+Each models builds up on the preceding models.
+
+The first model is an RStudio replication of the original article.
+Each models builds on top of the preceding models, and as I go about, I'll only annotate changes.
+
+Original Model
+```{r}
+#The model makes agents navigate an economic world with their talent. They all start with the same capital, 10.
+#Each round, an event can happen to an agent. It can be good or bad.
+#If a good event happens, the agent has to be smart enough to seize the opportunity, in which case it "can" double its capital. If a bad event happens, the agent loses half its capital.
+
+#There are 3 parameters for the model:
+#N : the number of agents
+#timemax: how many time-steps the model runs
+#Event_Likelihood: the probability for an event to happen
+
+economy <- function(N,timemax,Event_Likelihood){
+  #first, we create an empty frame of agents of size N
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  
+  #we initialize people's intelligence (normally distributed around 0.6 with a std of 0.1)
+  people$talent <- rnorm(N,0.6,0.1)
+  #then capital (everyone gets the same)
+  people$Kapital <- rep(10,N)
+  
+  #we create a matrix of events, each row correspond to an agent from the people's frame
+  #each column represent time (up to timemax)
+  #An event has Event_Likelihood chance to happen to someone. If it happens, it has equal chance of being good and bad.
+  #Thus, Event_Likelihood/2
+  #A good event is written 1, a bad event event is written -1, and no event is written 0
+  type <- matrix(sample(c(1,-1,0),timemax*N, replace = TRUE, prob = c(Event_Likelihood/2,Event_Likelihood/2,(1-Event_Likelihood))), nrow = N)
+  
+  #we extract the capital of agents in order to change it without modifying its value in the df
+  capital <- people$Kapital
+  #we create a new matrix that will hold people's capital as it evolves 
+  mapital <- matrix(nrow = N, ncol = timemax)
+  
+  #we loop in time to provoke the events
+  #at each time i, we take the column i of the event matrix
+  #we then then change the capital accordingly to the type of event that happened
+  for (i in 1:timemax){
+    #First, if event = 0 (nothing happens), then capital doesn't change
+    capital <- ifelse(type[,i] == 0,
+                      capital,
+                      #If type == 1 (event is good), create random number
+                      ifelse(type[,i] == 1,
+                             ifelse(runif(N) < people$talent,
+                                    capital*2,
+                                    #if random number > talent, capital stays the same
+                            #(You were not smart enough to seize the opportunity)
+                                    capital),
+                            #If type =/= 1 and =/= 0 (it can only be -1), a bad event happens
+                            #You lose half of your capital
+                             capital*0.5))
+    
+    #We add the modifications to the matrix, referencing the economic history of all agents
+    mapital[,i] <- capital
+  }
+
+  #Formating the final dataframe
+  #We add people's financial history to the original df
+  people <- cbind(people,mapital)
+  #We add a column to precise what kind of model we are running (useful later one when we tweak)
+  people$condition <- "inescapable"
+  #We add a column to precise Event_Likelihood to compare different Event_Likelihood values
+  people$Event_Likelihood <- Event_Likelihood
+  
+  return(people)
+}
+
+#### RUNS ####
+#the standard model at different Event_Likelihood values
+eco_norm1 <- economy(10000,80,0.001)
+eco_norm2 <- economy(10000,80,0.01)
+eco_norm3 <- economy(10000,80,0.1)
+eco_norm4 <- economy(10000,80,0.5)
+eco_norm5 <- economy(10000,80,0.9)
+#We put everything together to compare
+eco_norm <- rbind(eco_norm1,eco_norm2,eco_norm3,eco_norm4,eco_norm5)
+
+#### PLOTS ####
+#talent distribution
+ggplot(eco_norm3, aes(x = talent)) + 
+  geom_histogram(aes(y = ..density..), binwidth = 0.001, col="springgreen3") + labs(title="Distribution of talent for 10000 agents",y="Number Of Individuals",x="Talent")
+#capital distribution in the end game forEvent_Likelihood= 0.1
+ggplot(eco_norm3, aes(`80`)) +
+  geom_histogram(aes(y = ..density..),binwidth = 0.3, col="springgreen3",fill="springgreen3")+ scale_x_continuous(trans='log10')+ labs(title="Distribution of wealth for 10000 agents",y="Number Of Individuals",x="Capital after 80 iterations on a logaritmic scale")
+
+
+#Extra Plots
+ggplot(eco_norm3, aes(`80`)) +
+  geom_histogram(aes(y = ..density..),binwidth = 0.2, col="springgreen3")+ scale_x_continuous(trans='log10') + facet_grid(~Event_Likelihood) 
+#relation between capital and talent forEvent_Likelihood= 0.1
+ggplot(eco_norm1, aes(`80`, talent))+
+  geom_segment(aes(xend=`80`,alpha=0.1), yend=0) +
+    expand_limits(y=0) +
+  geom_point(color="springgreen3") +  scale_x_continuous(trans='log10') + labs(title="Distribution of wealth over Talent with Event_likelihood of 0.001",y="Talent",x="Capital/Succes")
+ggplot(eco_norm3, aes(`80`, talent))+
+  geom_segment(aes(xend=`80`,alpha=0.1), yend=0) +
+    expand_limits(y=0) +
+  geom_point(color="springgreen3") +  scale_x_continuous(trans='log10') + labs(title="Distribution of wealth over Talent with Event_likelihood of 0.1",y="Talent",x="Capital/Succes")+geom_smooth(method = "lm")
+ggplot(eco_norm5, aes(`80`,talent))+
+  geom_count(color="springgreen3", size=1) +  scale_x_continuous(trans='log10') + labs(title="Distribution of wealth over Talent with Event_likelihood of 0.9",subtitle = "Wide distribution of dots = More random",y="Talent (Positive Correlation = More Meritocratic)",x="Capital/Succes(Wide distribution = High Inequality)")+geom_smooth(method = "lm")
+
+
+```
+
+BALANCED LUCK
+Now, you can also escape bad events according to your talent.
+```{r}
+#### FUNCTION ####
+economy_balanced <- function(N,timemax,Event_Likelihood){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),timemax*N, replace = TRUE,prob = c(Event_Likelihood/2,Event_Likelihood/2,(1-Event_Likelihood))), nrow = N)
+  
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = timemax)
+  
+  for (i in 1:timemax){
+
+    capital <- ifelse(type[,i] == 0,
+                      capital,
+                      ifelse(type[,i] == 1,
+                            ifelse(runif(N) < people$talent,
+                                  capital*2,
+                                  capital),
+                            # /!\ /!\ CHANGE /!\ /!\ #
+                            #However, if capital =/= 0 and capital =/= 1, then create a random number again
+                            ifelse(runif(N) < people$talent,
+                                   #If your talent is higher, you keep your capital standing
+                                   capital,
+                                   capital*0.5)))
+    
+    mapital[,i] <- capital
+}
+
+#Adding a few column for data viz' later on
+people <- cbind(people,mapital)
+people$condition <- "Escapable"
+people$Event_Likelihood <- Event_Likelihood
+
+return(people)
+}
+
+
+#### RUNS ####
+#the balanced model at differentEvent_Likelihoodvalues
+eco_bal1 <- economy_balanced(10000,80,0.001)
+eco_bal2 <- economy_balanced(10000,80,0.01)
+eco_bal3 <- economy_balanced(10000,80,0.1)
+eco_bal4 <- economy_balanced(10000,80,0.5)
+eco_bal5 <- economy_balanced(10000,80,0.9)
+#big dataframe to compare standard and balanced models
+eco_NvsB <- rbind(eco_norm1,eco_norm2,eco_norm3,eco_norm4,eco_norm5,eco_bal1,eco_bal2,eco_bal3,eco_bal4, eco_bal5)
+
+
+#### PLOTS ####
+ggplot(eco_NvsB, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_wrap(~Event_Likelihood) + labs(title="Distribution of wealth over Talent over if bad Event are escapable or not",y="Capital/Succes",x="Talent")
+```
+
+TALENT BASED EVENT PAYOFF
+Now results of events depend directly on your talent (capital\*talent for bad luck, capital\*(1+talent) for good luck)
+```{r}
+#### FUNCTION ####
+economy_talent <- function(N,timemax,Event_Likelihood){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),timemax*N, replace = TRUE,prob = c(Event_Likelihood/2,Event_Likelihood/2,(1-Event_Likelihood))), nrow = N)
+  
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = timemax)
+  
+  for (i in 1:timemax){
+    capital <- ifelse(type[,i] == 0,
+                      capital,
+                      ifelse(type[,i] == 1,
+                            ifelse(runif(N) < people$talent,
+                            # /!\ /!\ CHANGE /!\ /!\ #
+                            #PS: remember, talent should be a number between 0 and 1
+                            
+                            #If you are smart enough, capital(t+1) = capital * 1.talent
+                                  capital*(1+people$talent),
+                                  capital),
+                            ifelse(runif(N) < people$talent,
+                                   capital,
+                            #If you're not smart enough to get out of trouble, capital(t+1) = capital*talent
+                                   capital*people$talent)))
+    mapital[,i] <- capital
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "Prior"
+  people$Event_Likelihood <- Event_Likelihood
+  
+  return(people)
+}
+
+
+#### RUNS ####
+#the talent model at different p_values
+eco_tal1 <- economy_talent(10000,80,0.001)
+eco_tal2 <- economy_talent(10000,80,0.01)
+eco_tal3 <- economy_talent(10000,80,0.1)
+eco_tal4 <- economy_talent(10000,80,0.5)
+eco_tal5 <- economy_talent(10000,80,0.9)
+#big dataframe to compare balanced and talent models
+eco_BvsT <- rbind(eco_bal1,eco_bal2,eco_bal3,eco_bal4,eco_bal5,eco_tal1,eco_tal2,eco_tal3,eco_tal4,eco_tal5)
+
+
+#### PLOTS ####
+ggplot(eco_BvsT, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_wrap(~Event_Likelihood) + labs(title="Distribution of wealth over Talent if Event outcomes are dependent on talent or not",y="Capital/Succes",x="Talent")
+```
+
+MERITOCRATIC PAYCHECK
+Now, when nothing happens, your capital still increases each turn. You get a salary.
+The salary is dependent on your talent (w*talent).
+```{r}
+#### FUNCTION ####
+#new variable: w = the base value of the yearly wage for all agents
+economy_meritopay <- function(N,timemax,Event_Likelihood,w){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),timemax*N, replace = TRUE,prob = c(Event_Likelihood/2,Event_Likelihood/2,(1-Event_Likelihood))), nrow = N)
+  
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = timemax)
+  for (i in 1:timemax){
+    capital <- ifelse(type[,i] == 0,
+                      # /!\ /!\ CHANGE /!\ /!\ #
+                      #If event == 0, you just get your usual salary
+                      #the smarter you are, the higher your salary
+                      #capital(t+1) = capital + wage*talent
+                      capital+w*people$talent,
+                      ifelse(type[,i] == 1,
+                            ifelse(runif(N) < people$talent,
+                                  capital*(1+people$talent),
+                                  capital),
+                            ifelse(runif(N) < people$talent,
+                                   capital,
+                                   capital*people$talent)))
+    mapital[,i] <- capital
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "paycheck"
+  people$Event_Likelihood <- Event_Likelihood
+  people$w <- w
+return(people)
+}
+#### RUNS ####
+#the meritocratic paycheck model at different wage
+eco_pay1 <- economy_meritopay(10000,80,0.1,0.01)
+eco_pay2 <- economy_meritopay(10000,80,0.1,0.05)
+eco_pay3 <- economy_meritopay(10000,80,0.1,1)
+eco_pay4 <- economy_meritopay(10000,80,0.1,5)
+eco_pay5 <- economy_meritopay(10000,80,0.1,10)
+eco_pay <- rbind(eco_pay1,eco_pay2,eco_pay3,eco_pay4,eco_pay5)
+
+#the meritocratic paycheck model at differentEvent_Likelihoodvalues
+eco_pay6 <- economy_meritopay(10000,80,0.001,1)
+eco_pay7 <- economy_meritopay(10000,80,0.01,1)
+eco_pay8 <- economy_meritopay(10000,80,0.1,1)
+eco_pay9 <- economy_meritopay(10000,80,0.5,1)
+eco_pay10 <- economy_meritopay(10000,80,0.9,1)
+#big dataframe to compare talent and paycheck model
+eco_TvsP <- rbind(eco_pay6,eco_pay7,eco_pay8,eco_pay9,eco_pay10)
+eco_TvsP <- eco_TvsP %>% 
+  select(-w)
+eco_TvsP <- rbind(eco_TvsP,eco_tal1,eco_tal2,eco_tal3,eco_tal4,eco_tal5)
+
+#### PLOTS ####
+#relation between paycheck and inequality (with fix event rate at 0.1)
+ggplot(eco_pay, aes(talent,`80`)) +
+  geom_point(alpha=0.1, size=0.5, color="springgreen") +
+  scale_y_continuous(trans='log10')+
+  facet_wrap(~w) + labs(title="Distribution of wealth over Talent for different Wage levels at Event_likelihood of 0.1",y="Capital/Succes",x="Talent")
+#comparing the talent based model to the meritocratic paycheck one (with fix w = 1)
+ggplot(eco_TvsP, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood) + labs(title="Distribution of wealth over Talent for Wage Model with W=1 against the prior model",y="Capital/Succes",x="Talent")
+```
+
+INTEREST RATE
+Now, the capital is increased every turn according to an interest rate.
+```{r}
+#### FUNCTION ####
+#new variable: r = interest rate upon which your capital increases every time step
+economy_interest <- function(N,timemax,Event_Likelihood,w,r){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),timemax*N, replace = TRUE,prob = c(Event_Likelihood/2,Event_Likelihood/2,(1-Event_Likelihood))), nrow = N)
+  
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = timemax)
+  # /!\ /!\ CHANGES /!\ /!\ #
+  #We add a new dataframe for luck for later Viz
+  lucky <- matrix(nrow = N,ncol = timemax)
+  for (i in 1:timemax){
+    
+     # /!\ /!\ CHANGE /!\ /!\ #
+    #add your interest rate at the beginning of a timestep, no matter what
+    capital <- capital + capital*r
+
+    capital <- ifelse(type[,i] == 0,
+                      capital+w*people$talent,
+                      ifelse(type[,i] == 1,
+                            ifelse(runif(N) < people$talent,
+                                  capital*(1+people$talent),
+                                  capital),
+                            ifelse(runif(N) < people$talent,
+                                   capital,
+                                   capital*people$talent)))
+    
+    # /!\ /!\ CHANGES /!\ /!\ #
+    #We calculate people's luck outcome
+    luck = case_when(
+      type[,i] == 0 ~ 0,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  1,
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  -1))
+    mapital[,i] <- capital
+    lucky[,i] <- luck
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "interest"
+  #people$tax_range <- 0
+  #people$ubi <- 0
+  people$Event_Likelihood <- Event_Likelihood
+  people$w <- w
+  #people$r <- r
+  #people$K <- "Flat"
+   # /!\ /!\ CHANGES /!\ /!\ #
+  #We Make rows and coloumns to plot luck
+  #people$talent2 <- people$talent
+  #people <- cbind(people,lucky)
+return(people)
+}
+
+#### RUNS ####
+#runs for different values of r with no paycheck w=0
+eco_int1 <- economy_interest(10000,80,0.1,0,0.001)
+eco_int2 <- economy_interest(10000,80,0.1,0,0.01)
+eco_int3 <- economy_interest(10000,80,0.1,0,0.1)
+eco_int4 <- economy_interest(10000,80,0.1,0,0.2)
+eco_int5 <- economy_interest(10000,80,0.1,0,0.25)
+eco_int <- rbind(eco_int1,eco_int2,eco_int3,eco_int4,eco_int5)
+#runs for different values of r with a paycheck of w=1
+eco_int6 <- economy_interest(10000,80,0.1,1,0.001)
+eco_int7 <- economy_interest(10000,80,0.1,1,0.01)
+eco_int8 <- economy_interest(10000,80,0.1,1,0.05)
+eco_int9 <- economy_interest(10000,80,0.1,1,0.1)
+eco_int10 <- economy_interest(10000,80,0.1,1,0.2)
+eco_intW <- rbind(eco_int6,eco_int7,eco_int8,eco_int9,eco_int10)
+#runs for different values of Event_Likelihoods with a paycheck of w=1 and an interest rate of r=0.1
+eco_int11 <- economy_interest(10000,80,0.001,1,0.05)
+eco_int12 <- economy_interest(10000,80,0.01,1,0.05)
+eco_int13 <- economy_interest(10000,80,0.1,1,0.05)
+eco_int14 <- economy_interest(10000,80,0.5,1,0.05)
+eco_int15 <- economy_interest(10000,80,0.9,1,0.05) 
+#big dataframe to compare paycheck and interest model
+eco_PvsI <- rbind(eco_int11,eco_int12,eco_int13,eco_int14,eco_int15)
+eco_PvsI <- eco_PvsI %>% 
+  select(-r)
+eco_PvsI <- rbind(eco_PvsI,eco_pay6,eco_pay7,eco_pay8,eco_pay9,eco_pay10)
+
+#### PLOTS ####
+#different r value without any paycheck
+ggplot(eco_int, aes(talent,`80`)) +
+  geom_point(alpha=0.1, color="blue") +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~r)
+#different r value with paycheck of w=1
+ggplot(eco_intW, aes(talent,`80`)) +
+  geom_point(alpha=0.1, color="springgreen") +
+  scale_y_continuous(trans='log10')+
+  facet_wrap(~r) + labs(title="Distribution of wealth over Talent for different Interest levels at Event_likelihood of 0.1",y="Capital/Succes",x="Talent")
+#comparing the paycheck model to the interest rate one (with fix w = 1 and fix r = 0.1)
+ggplot(eco_PvsI, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood) + labs(title="Distribution of wealth over Talent for Interest Rate Model with R=0.05 against the prior model",y="Capital/Succes",x="Talent")
+```
+POORTAX
+A ghetto tax/poortax the phenomenon of people with low incomes, particularly those living in poverty-stricken areas, paying higher prices for goods and services. (crappy shoes - terry pratchett)
+https://en.wikipedia.org/wiki/Ghetto_tax
+```{r}
+#Again we add a new variable: poor_tax_range -> the range of possible tax you can get, the poorest in the lower half of the population will have to pay the highest number, while the richest lower half will have to pay the lowest number. 0.01 to 0.01 means you have to pay between 0.1% and 1% of your capital every round. The richest half do not have any poorax as they can be argued to be able to buy bulk, invest in good tools etc.
+economy_poortax <- function(N,timemax,Event_Likelihood,w,r, poortax_range){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),
+                         timemax*N,
+                         replace = TRUE, 
+                         prob = c(Event_Likelihood/2,Event_Likelihood/2,(1-Event_Likelihood))), nrow = N)
+
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = timemax)
+  lucky <- matrix(nrow = N,ncol = timemax)
+  
+  for (i in 1:timemax){
+
+    capital <- capital + capital*r
+    
+     # /!\ /!\ BIG CHANGES /!\ /!\ #
+    #We calculate z scores and cumulative probabilites, as in the previous model
+    m <- mean(capital)
+    std <- sd(capital)
+    z_score <- (capital - m) / std
+    prob = case_when(
+      std == 0 ~ .5,
+      TRUE ~ pnorm(z_score))
+    
+    #we calculate the poortaxes you have to pay
+    #if probability is above the mean, you have no taxes
+    #if probability is very low, your taxes are close to the higher boundaries
+   poortax <- case_when(
+      prob <= .5 ~ poortax_range[2] - diff(poortax_range) * prob *2,
+      prob > .5 ~ 0,
+      TRUE ~ pnorm(z_score))
+    
+    #We calculate people's profit according to the usual system developped in earlier models
+    capital_gains = case_when(
+      type[,i] == 0 ~ w*people$talent,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  capital*(people$talent),
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  capital*(people$talent - 1)))
+
+    luck = case_when(
+      type[,i] == 0 ~ 0,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  1,
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  -1))
+    
+    #After caculating people's profit for this time step, you add it to their capital while adding taxes
+    capital = case_when(
+      capital_gains > 0 ~ capital*(1-poortax) + capital_gains ,
+      capital_gains <= 0 ~ capital*(1-poortax) + capital_gains) #if one's profit is negative u still get taxed as poor
+    
+    mapital[,i] <- capital
+    lucky[,i] <- luck
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "poortax"
+  people$tax_range <- 0
+  people$ubi <- 0
+  people$Event_Likelihood <- Event_Likelihood
+  people$w <- w
+  people$r <- r
+  people$K <- "Flat"
+  #people$poortax_range <- poortax_range[1]
+  people$talent2 <- people$talent
+  people <- cbind(people,lucky)
+return(people)
+}
+
+#### RUNS ####
+#runs for different values of Event_Likelihoods with a paycheck of w=1 and an interest rate of r=0.1
+eco_poortax1 <- economy_poortax(10000,80,0.001,1,0.05,poortax_range = c(.001, .01))
+eco_poortax2 <- economy_poortax(10000,80,0.01,1,0.05,poortax_range = c(.001, .01))
+eco_poortax3 <- economy_poortax(10000,80,0.1,1,0.05,poortax_range = c(.001, .01))
+eco_poortax4 <- economy_poortax(10000,80,0.5,1,0.05,poortax_range = c(.001, .01))
+eco_poortax5 <- economy_poortax(10000,80,0.9,1,0.05,poortax_range = c(.001, .01)) 
+#big dataframe to compare tax and interest model
+eco_PTvsIn <- rbind(eco_poortax1,eco_poortax2,eco_poortax3,eco_poortax4,eco_poortax5, eco_int11,eco_int12,eco_int13,eco_int14,eco_int15)
+#Runs for different values of poortax
+eco_poortax1n <- economy_poortax(10000,80,0.001,1,0.05,poortax_range = c(.0001, .001))
+eco_poortax2n <- economy_poortax(10000,80,0.001,1,0.05,poortax_range = c(.001, .01))
+eco_poortax3n <- economy_poortax(10000,80,0.001,1,0.05,poortax_range = c(.005, .05))
+eco_poortax4n <- economy_poortax(10000,80,0.001,1,0.05,poortax_range = c(.01, .1))
+eco_poortax5n <- economy_poortax(10000,80,0.001,1,0.05,poortax_range = c(.1, .2))
+eco_PTs <- rbind(eco_poortax1n,eco_poortax2n,eco_poortax3n,eco_poortax4n,eco_poortax5n)
+
+#Dataframe for Viz
+Poorviz <- rbind(eco_poortax1,eco_poortax2,eco_poortax3,eco_poortax4,eco_poortax5)
+
+#### PLOTS ####
+#comparing the tax model to the interest rate one (with fix w = 1 and fix r = 1)
+ggplot(eco_PTvsIn, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood) + labs(title="Distribution of wealth over Talent for Poortaxmodel with poortax_range = c(.001, .01) against the prior model",y="Capital/Succes",x="Talent")
+#comparing the tax model to the interest rate one (with fix w = 1 and fix r = 1)
+ggplot(eco_PTs, aes(talent,`80`)) +
+  geom_point(alpha=0.15,size=0.1, color="springgreen") +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~poortax_range) + labs(title="Distribution of wealth over Talent for different Poortax levels at Event_likelihood of 0.1",y="Capital/Succes",x="Talent")
+
+```
+
+
+
+
+WEALTH REDISTRIBUTION MODEL
+Using the taxes collected, you can redistribute wealth equally amongst citizens. 
+```{r}
+#### FUNCTION ####
+economy_distribution <- function(N,timemax,Event_Likelihood,w,r,tax_range, poortax_range = c(.001, .01)){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),
+                         timemax*N,
+                         replace = TRUE, 
+                         prob = c(Event_Likelihood/2,Event_Likelihood/2,(1-Event_Likelihood))), nrow = N)
+
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = timemax)
+  lucky <- matrix(nrow = N,ncol = timemax)
+  
+  for (i in 1:timemax){
+
+    capital <- capital + capital*r
+    
+    m <- mean(capital)
+    std <- sd(capital)
+    z_score <- (capital - m) / std
+    prob = case_when(
+      std == 0 ~ .5,
+      TRUE ~ pnorm(z_score))
+    tax = tax_range[1] + diff(tax_range) * prob
+
+   poortax <- case_when(
+      prob <= .5 ~ poortax_range[2] - diff(poortax_range) * prob *2,
+      prob > .5 ~ 0,
+      TRUE ~ pnorm(z_score))
+    
+    capital_gains = case_when(
+      type[,i] == 0 ~ w*people$talent,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  capital*(people$talent),
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  capital*(people$talent - 1)))
+
+    luck = case_when(
+      type[,i] == 0 ~ 0,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  1,
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  -1))
+    
+    #We calculate people's new capital according to profit and tax rate
+    capital = case_when(
+      capital_gains > 0 ~ capital*(1-poortax) + capital_gains * (1-tax),
+      capital_gains <= 0 ~ capital*(1-poortax) + capital_gains ) #if one's profit is negative u still get taxed as poor
+    
+    # /!\ /!\ BIG CHANGES /!\ /!\ #
+    #We calculate the total earnings from the taxes
+    government_tax_earnings = sum(case_when(
+      capital_gains > 0 ~ capital_gains * (tax),
+      capital_gains <= 0 ~ 0))
+    # redistribute the tax wealth equally! Everyone gets an equal piece of the total government tax earnings
+    capital = capital + ((government_tax_earnings / N))
+    
+    mapital[,i] <- capital
+    lucky[,i] <- luck
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "Wealth Dist"
+  people$tax_range <- tax_range[2] ##########################################<3############
+  people$ubi <- 0
+  people$Event_Likelihood <- Event_Likelihood
+  people$w <- w
+  people$r <- r
+  people$K <- "Flat"
+  #people$talent2 <- people$talent
+  #people <- cbind(people,lucky)
+return(people)
+}
+
+#### RUNS ####
+#runs different tax levels for different values of Event_Likelihoods with a paycheck of w=1 and an interest rate of r=0.1
+eco_dist1_2 <- economy_distribution(10000,80,0.001,1,0.05, tax_range = c(.0, .2))
+eco_dist2_2 <- economy_distribution(10000,80,0.01,1,0.05, tax_range = c(.0, .2))
+eco_dist3_2 <- economy_distribution(10000,80,0.1,1,0.05, tax_range = c(.0, .2))
+eco_dist4_2 <- economy_distribution(10000,80,0.5,1,0.05, tax_range = c(.0, .2))
+eco_dist5_2 <- economy_distribution(10000,80,0.9,1,0.05, tax_range = c(.0, .2)) 
+
+eco_dist1_3 <- economy_distribution(10000,80,0.001,1,0.05, tax_range = c(.0, .3))
+eco_dist2_3 <- economy_distribution(10000,80,0.01,1,0.05, tax_range = c(.0, .3))
+eco_dist3_3 <- economy_distribution(10000,80,0.1,1,0.05, tax_range = c(.0, .3))
+eco_dist4_3 <- economy_distribution(10000,80,0.5,1,0.05, tax_range = c(.0, .3))
+eco_dist5_3 <- economy_distribution(10000,80,0.9,1,0.05, tax_range = c(.0, .3)) 
+
+eco_dist1_4 <- economy_distribution(10000,80,0.001,1,0.05, tax_range = c(.0, .4))
+eco_dist2_4 <- economy_distribution(10000,80,0.01,1,0.05, tax_range = c(.0, .4))
+eco_dist3_4 <- economy_distribution(10000,80,0.1,1,0.05, tax_range = c(.0, .4))
+eco_dist4_4 <- economy_distribution(10000,80,0.5,1,0.05, tax_range = c(.0, .4))
+eco_dist5_4 <- economy_distribution(10000,80,0.9,1,0.05, tax_range = c(.0, .4)) 
+
+eco_dist1_5 <- economy_distribution(10000,80,0.001,1,0.05, tax_range = c(.0, .5))
+eco_dist2_5 <- economy_distribution(10000,80,0.01,1,0.05, tax_range = c(.0, .5))
+eco_dist3_5 <- economy_distribution(10000,80,0.1,1,0.05, tax_range = c(.0, .5))
+eco_dist4_5 <- economy_distribution(10000,80,0.5,1,0.05, tax_range = c(.0, .5))
+eco_dist5_5 <- economy_distribution(10000,80,0.9,1,0.05, tax_range = c(.0, .5)) 
+
+eco_dist1_6 <- economy_distribution(10000,80,0.001,1,0.05, tax_range = c(.0, .6))
+eco_dist2_6 <- economy_distribution(10000,80,0.01,1,0.05, tax_range = c(.0, .6))
+eco_dist3_6 <- economy_distribution(10000,80,0.1,1,0.05, tax_range = c(.0, .6))
+eco_dist4_6 <- economy_distribution(10000,80,0.5,1,0.05, tax_range = c(.0, .6))
+eco_dist5_6 <- economy_distribution(10000,80,0.9,1,0.05, tax_range = c(.0, .6)) 
+
+eco_dist1_7 <- economy_distribution(10000,80,0.001,1,0.05, tax_range = c(.0, .7))
+eco_dist2_7 <- economy_distribution(10000,80,0.01,1,0.05, tax_range = c(.0, .7))
+eco_dist3_7 <- economy_distribution(10000,80,0.1,1,0.05, tax_range = c(.0, .7))
+eco_dist4_7 <- economy_distribution(10000,80,0.5,1,0.05, tax_range = c(.0, .7))
+eco_dist5_7 <- economy_distribution(10000,80,0.9,1,0.05, tax_range = c(.0, .7))
+
+#Making a model that can be compared to the UBI model
+eco_dist1_U <- economy_distribution(10000,80,0.001,1,0.05, tax_range = c(.0, .5))
+eco_dist2_U <- economy_distribution(10000,80,0.01,1,0.05, tax_range = c(.0, .5))
+eco_dist3_U <- economy_distribution(10000,80,0.1,1,0.05, tax_range = c(.0, .5))
+eco_dist4_U <- economy_distribution(10000,80,0.5,1,0.05, tax_range = c(.0, .5))
+eco_dist5_U <- economy_distribution(10000,80,0.9,1,0.05, tax_range = c(.0, .5))
+
+#big dataframe to compare distribution and interest model
+eco_TD <- rbind(eco_dist1_2,eco_dist2_2,eco_dist3_2,eco_dist4_2,eco_dist5_2,eco_dist1_3,eco_dist2_3,eco_dist3_3,eco_dist4_3,eco_dist5_3,eco_dist1_4,eco_dist2_4,eco_dist3_4,eco_dist4_4,eco_dist5_4,eco_dist1_5,eco_dist2_5,eco_dist3_5,eco_dist4_5,eco_dist5_5,eco_dist1_6,eco_dist2_6,eco_dist3_6,eco_dist4_6,eco_dist5_6,eco_dist1_7,eco_dist2_7,eco_dist3_7,eco_dist4_7,eco_dist5_7,eco_poortax1,eco_poortax2,eco_poortax3,eco_poortax4,eco_poortax5)
+
+#Dataframe for Viz
+Distviz <- rbind(eco_dist1_U,eco_dist2_U,eco_dist3_U,eco_dist4_U,eco_dist5_U)
+
+#### PLOTS ####
+#comparing the distribution model with different tax-levels
+ggplot(eco_TD, aes(talent,`80`, color=tax_range)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood) + labs(title="Distribution of wealth over Talent across different Event_likelihoods",y="Capital/Succes",x="Talent")
+
+#Comparing the UBI and Taxmodel of 50% procent with poortaxmodel
+ggplot(Distviz, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood) + labs(title="Distribution of wealth over Talent across different Event_likelihoods ",y="Capital/Succes",x="Talent")+geom_smooth(method = "lm")
+#Include On Poor Tax In every model - Good baseline to show how wealthdistribution actually helps A LOT LOT
+```
+
+UBI
+In the earlier wealth redistribution, the taxes were divided equally between all citizens (imagine infrastructure, hospitalcare etc.). So in this round we'll swap some taxes to just give them a fixed "living wage", as this should be a set amount not only dependent on the taxes collected at a given timestamp.
+https://works.bepress.com/widerquist/75/
+The Cost  Of UBI
+50% tax *0.85 = 42.5
+Th UBI is  larger than the collected share of taxes at the first timestamp signifying the state investing and going into debt, but taxes paid for the ubi equal out later as the total sum of taxes grow as a function of the "societal" growth.
+
+```{r}
+#### FUNCTION ####
+economy_ubi <- function(N,timemax,Event_Likelihood,w,r,ubi, ubitax_range, poortax_range = c(.001, .01)){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),
+                         timemax*N,
+                         replace = TRUE, 
+                         prob = c(Event_Likelihood/2,Event_Likelihood/2,(1-Event_Likelihood))), nrow = N)
+
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = timemax)
+  lucky <- matrix(nrow = N,ncol = timemax)
+  
+  for (i in 1:timemax){
+
+    capital <- capital + capital*r
+    
+
+    m <- mean(capital)
+    std <- sd(capital)
+    z_score <- (capital - m) / std
+    prob = case_when(
+      std == 0 ~ .5,
+      TRUE ~ pnorm(z_score))
+    tax = ubitax_range[1] + diff(ubitax_range) * prob
+
+   poortax <- case_when(
+      prob <= .5 ~ poortax_range[2] - diff(poortax_range) * prob *2,
+      prob > .5 ~ 0,
+      TRUE ~ pnorm(z_score))
+    
+    capital_gains = case_when(
+      type[,i] == 0 ~ w*people$talent,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  capital*(people$talent),
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  capital*(people$talent - 1)))
+
+    luck = case_when(
+      type[,i] == 0 ~ 0,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  1,
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  -1))
+    
+    #We calculate people's new capital according to profit and tax rate
+    capital = case_when(
+      capital_gains > 0 ~ capital*(1-poortax) + capital_gains * (1-tax),
+      capital_gains <= 0 ~ capital*(1-poortax) + capital_gains)#if one's profit is negative u still get taxed as poor
+    #We calculate people's new capital according to profit and tax rate
+     
+    #We calculate the total earnings from the taxes
+    government_tax_earnings = sum(case_when(
+      capital_gains > 0 ~ capital_gains * (tax),
+      capital_gains <= 0 ~ 0))
+    
+     # /!\ /!\ CHANGES /!\ /!\ #
+    # The Government Tax Earning stay but with a 15% subtraction as a flat UBI rate is given out.
+    capital = capital + ubi + (((government_tax_earnings/50)*42.5) / N)
+    
+    mapital[,i] <- capital
+    lucky[,i] <- luck
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "ubi"
+  people$tax_range <- 0
+  people$ubi <- ubi
+  people$Event_Likelihood <- Event_Likelihood
+  people$w <- w
+  people$r <- r
+  people$K <- "Flat"
+  #people$talent2 <- people$talent
+  #people <- cbind(people,lucky)
+return(people)
+}
+
+#### RUNS ####
+#runs for different values of Event_Likelihoods with a paycheck of w=1 and an interest rate of r=0.1
+eco_ubi1_1 <- economy_ubi(10000,80,0.001,1,0.05, ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi2_1 <- economy_ubi(10000,80,0.01,1,0.05, ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi3_1 <- economy_ubi(10000,80,0.1,1,0.05, ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi4_1 <- economy_ubi(10000,80,0.5,1,0.05, ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi5_1 <- economy_ubi(10000,80,0.9,1,0.05, ubi = 1,ubitax_range = c(.0, .5)) 
+
+eco_ubi1_5 <- economy_ubi(10000,80,0.001,1,0.05, ubi = 5,ubitax_range = c(.0, .5))
+eco_ubi2_5 <- economy_ubi(10000,80,0.01,1,0.05, ubi = 5,ubitax_range = c(.0, .5))
+eco_ubi3_5 <- economy_ubi(10000,80,0.1,1,0.05, ubi = 5,ubitax_range = c(.0, .5))
+eco_ubi4_5 <- economy_ubi(10000,80,0.5,1,0.05, ubi = 5,ubitax_range = c(.0, .5))
+eco_ubi5_5 <- economy_ubi(10000,80,0.9,1,0.05, ubi = 5,ubitax_range = c(.0, .5)) 
+
+eco_ubi1_10 <- economy_ubi(10000,80,0.001,1,0.05, ubi = 10,ubitax_range = c(.0, .5))
+eco_ubi2_10 <- economy_ubi(10000,80,0.01,1,0.05, ubi = 10,ubitax_range = c(.0, .5))
+eco_ubi3_10 <- economy_ubi(10000,80,0.1,1,0.05, ubi = 10,ubitax_range = c(.0, .5))
+eco_ubi4_10 <- economy_ubi(10000,80,0.5,1,0.05, ubi = 10,ubitax_range = c(.0, .5))
+eco_ubi5_10 <- economy_ubi(10000,80,0.9,1,0.05, ubi = 10,ubitax_range = c(.0, .5)) 
+
+#big dataframe to look at UBI's
+eco_UBI <- rbind(eco_ubi1_1,eco_ubi2_1,eco_ubi3_1,eco_ubi4_1,eco_ubi5_1,eco_ubi1_5,eco_ubi2_5,eco_ubi3_5,eco_ubi4_5,eco_ubi5_5,eco_ubi1_10,eco_ubi2_10,eco_ubi3_10,eco_ubi4_10,eco_ubi5_10)
+#big dataframe to compare ubi and poortax model
+eco_UBIvsP <- rbind(eco_ubi1_1,eco_ubi2_1,eco_ubi3_1,eco_ubi4_1,eco_ubi5_1,eco_ubi1_5,eco_ubi2_5,eco_ubi3_5,eco_ubi4_5,eco_ubi5_5,eco_ubi1_10,eco_ubi2_10,eco_ubi3_10,eco_ubi4_10,eco_ubi5_10, eco_poortax1,eco_poortax2,eco_poortax3,eco_poortax4,eco_poortax5)
+#big dataframe to compare ubi to distribution model
+eco_UBIvsDist <- rbind(eco_ubi1_1,eco_ubi2_1,eco_ubi3_1,eco_ubi4_1,eco_ubi5_1,eco_ubi1_5,eco_ubi2_5,eco_ubi3_5,eco_ubi4_5,eco_ubi5_5,eco_ubi1_10,eco_ubi2_10,eco_ubi3_10,eco_ubi4_10,eco_ubi5_10, eco_dist1_U,eco_dist2_U,eco_dist3_U,eco_dist4_U,eco_dist5_U)
+
+#Dataframe for Viz
+Ubiviz <- rbind(eco_ubi1_10,eco_ubi2_10,eco_ubi3_10,eco_ubi4_10,eco_ubi5_10)
+
+#### PLOTS ####
+#Look at the UBI
+ggplot(eco_UBI, aes(talent,`80`, color=ubi)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood)+ labs(title="Distribution of wealth over Talent across different Event_likelihoods",y="Capital/Succes",x="Talent")
+#comparing the ubi model to the poortax one (with fix w = 1 and fix r = 1)
+ggplot(eco_UBIvsP, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(Event_Likelihood~ubi)
+#comparing the distribution model to the ubi one (with fix w = 1 and fix r = 1)
+ggplot(eco_UBIvsDist, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(Event_Likelihood~ubi)
+
+#### PLOTS ####
+#comparing the distribution model with different tax-levels
+ggplot(eco_TD, aes(talent,`80`)) +
+  geom_point(alpha=0.15,size=0.1, color="springgreen3") +
+  scale_y_continuous(trans='log10')+
+  facet_grid(Event_Likelihood~tax_range) + labs(title="Distribution of wealth over Talent across different Event_likelihoods (right y-axis) and different taxlevels (Upper x-axis)",y="Capital/Succes",x="Talent")+geom_smooth(method = "lm")
+
+#Comparing the taxlevel of 50% procent with poortaxmodel
+ggplot(Distviz, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood) + labs(title="Distribution of wealth over Talent across different Event_likelihoods ",y="Capital/Succes",x="Talent")+geom_smooth(method = "lm")
+```
+
+
+
+
+
+
+
+
+
+
+#Capitalism    rep(10,N)
+
+https://en.wikipedia.org/wiki/List_of_countries_by_tax_rates (Tax on cooperations are around 20 %)
+http://www.oecd.org/g20/topics/employment-and-social-policy/The-Labour-Share-in-G20-Economies.pdf (Capital / wage gap is around 40/60% Today for OCD)
+```{r}
+#### FUNCTION ####
+#Capitalism on Wealth Dist
+economy_distribution_cap <- function(N,timemax,Event_Likelihood,w,r,tax_range, capitalism_range = .4, poortax_range = c(.001, .01)){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),
+                         timemax*N,
+                         replace = TRUE, 
+                         prob = c(Event_Likelihood/2,Event_Likelihood/2,(1-Event_Likelihood))), nrow = N)
+
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = timemax)
+  lucky <- matrix(nrow = N,ncol = timemax)
+  
+  for (i in 1:timemax){
+    capital <- capital + capital*r
+    
+    m <- mean(capital)
+    std <- sd(capital)
+    z_score <- (capital - m) / std
+    prob = case_when(
+      std == 0 ~ .5,
+      TRUE ~ pnorm(z_score))
+
+    tax = tax_range[1] + diff(tax_range) * prob
+    
+    # /!\ /!\ CHANGES /!\ /!\ #
+    #Adding Capitalism, where you have to pay a flat rate of 40% of the income if you are the buttom 40 %
+    capitalism <- case_when(
+      prob < 0.8 ~ capitalism_range,
+      prob >= 0.8 ~ 0.0,
+      TRUE ~ pnorm(z_score))
+    
+   poortax <- case_when(
+      prob <= .5 ~ poortax_range[2] - diff(poortax_range) * prob *2,
+      prob > .5 ~ 0,
+      TRUE ~ pnorm(z_score))
+
+    #We calculate people's profit according to the usual system developped in earlier models
+    capital_gains = case_when(
+      type[,i] == 0 ~ w*people$talent,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  capital*(people$talent),
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  capital*(people$talent - 1)))
+    # /!\ /!\ CHANGES /!\ /!\ #
+    #We calculate people's luck outcome
+    luck = case_when(
+      type[,i] == 0 ~ 0,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  1,
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  -1))
+    
+    #We calculate people's new capital according to profit and tax rate
+    capital = case_when(
+      capital_gains > 0 ~ capital*(1-poortax) + capital_gains * (1-tax)*(1-capitalism),
+      capital_gains <= 0 ~ capital*(1-poortax) + capital_gains * (1-capitalism)) #if one's profit is negative u still get taxed as poor
+    
+    # /!\ /!\ CHANGES /!\ /!\ #
+    #We calculate the total earnings from the taxes (progressive tax on income and - falt 20% of corporate tax)
+    government_tax_earnings = sum(case_when(
+      capital_gains > 0 ~ (capital_gains * (tax))+((capital_gains * (capitalism))*0.2),
+      capital_gains <= 0 ~ 0))
+    
+    # /!\ /!\ CHANGES /!\ /!\ #
+    #We calculate the total earnings from the capitalism (Remembering to subtract corporate tax)
+    capitalism_earnings = sum(case_when(
+      capital_gains > 0 ~ ((capital_gains * (capitalism))*0.8),
+      capital_gains <= 0 ~ 0))
+    
+    # redistribute the wealth equally! Everyone gets an equal piece of the total government tax earnings
+    capital = capital + ((government_tax_earnings / N))
+    
+    # /!\ /!\ CHANGES /!\ /!\ #
+    #Distribute Capitalism to top 20%
+    capital = case_when(
+      prob < 0.8 ~ capital,
+      prob >= 0.8 ~ capital + (capitalism_earnings/(N*0.2)),
+      TRUE ~ pnorm(z_score))
+    
+    mapital[,i] <- capital
+    lucky[,i] <- luck
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "Wealth Dist + Capitalism"
+  people$tax_range <- tax_range[2] ##########################################<3############
+  people$ubi <- 0
+  people$Event_Likelihood <- Event_Likelihood
+  people$w <- w
+  people$r <- r
+  people$K <- "Flat"
+  #people$talent2 <- people$talent
+  #people <- cbind(people,lucky)
+return(people)
+}
+
+#### RUNS ####
+#runs for different values of Event_Likelihoods with a paycheck of w=1 and an interest rate of r=0.1
+
+eco_dist1_cap <- economy_distribution_cap(1000,80,0.001,1,0.05, tax_range = c(.0, .5))
+eco_dist2_cap <- economy_distribution_cap(10000,80,0.01,1,0.05, tax_range = c(.0, .5))
+eco_dist3_cap <- economy_distribution_cap(10000,80,0.1,1,0.05, tax_range = c(.0, .5))
+eco_dist4_cap <- economy_distribution_cap(10000,80,0.5,1,0.05, tax_range = c(.0, .5))
+eco_dist5_cap <- economy_distribution_cap(10000,80,0.9,1,0.05, tax_range = c(.0, .5)) 
+
+#big dataframe to compare distribution and interest model
+eco_capvsP <- rbind(eco_dist1_cap,eco_dist2_cap,eco_dist3_cap,eco_dist4_cap,eco_dist5_cap, eco_poortax1,eco_poortax2,eco_poortax3,eco_poortax4,eco_poortax5,eco_dist1_U,eco_dist2_U,eco_dist3_U,eco_dist4_U,eco_dist5_U,eco_poortax1_cap,eco_poortax2_cap,eco_poortax3_cap,eco_poortax4_cap,eco_poortax5_cap)
+
+#Dataframe for Viz
+CapDistViz <- rbind(eco_dist1_cap,eco_dist2_cap,eco_dist3_cap,eco_dist4_cap,eco_dist5_cap)
+
+#### PLOTS ####
+#comparing the distribution model to the interest rate one (with fix w = 1 and fix r = 0.1)
+ggplot(eco_capvsP, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#UBI
+#### FUNCTION ####
+economy_ubi_cap <- function(N,timemax,Event_Likelihood,w,r,ubi, ubitax_range, capitalism_range = .4, poortax_range = c(.001, .01)){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),
+                         timemax*N,
+                         replace = TRUE, 
+                         prob = c(Event_Likelihood/2,Event_Likelihood/2,(1-Event_Likelihood))), nrow = N)
+
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = timemax)
+  lucky <- matrix(nrow = N,ncol = timemax)
+  
+  for (i in 1:timemax){
+
+    capital <- capital + capital*r
+    
+    m <- mean(capital)
+    std <- sd(capital)
+    z_score <- (capital - m) / std
+    prob = case_when(
+      std == 0 ~ .5,
+      TRUE ~ pnorm(z_score))
+    tax = ubitax_range[1] + diff(ubitax_range) * prob
+    #Adding Capitalism
+    capitalism <- case_when(
+      prob < 0.8 ~ capitalism_range,
+      prob >= 0.8 ~ 0.0,
+      TRUE ~ pnorm(z_score))
+    
+   poortax <- case_when(
+      prob <= .5 ~ poortax_range[2] - diff(poortax_range) * prob *2,
+      prob > .5 ~ 0,
+      TRUE ~ pnorm(z_score))
+    
+    #We calculate people's profit according to the usual system developped in earlier models
+    capital_gains = case_when(
+      type[,i] == 0 ~ w*people$talent,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  capital*(people$talent),
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  capital*(people$talent - 1)))
+    luck = case_when(
+      type[,i] == 0 ~ 0,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  1,
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  -1))
+    
+    #We calculate people's new capital according to profit and tax rate
+    capital = case_when(
+      capital_gains > 0 ~ capital*(1-poortax) + capital_gains * (1-tax)*(1-capitalism),
+      capital_gains <= 0 ~ capital*(1-poortax) + capital_gains*(1-capitalism))#if one's profit is negative u still get taxed as poor
+    #We calculate people's new capital according to profit and tax rate
+     
+    #We calculate the total earnings from the taxes (progressive tax on income and - falt 20% of corporate tax)
+    government_tax_earnings = sum(case_when(
+      capital_gains > 0 ~ (capital_gains * (tax))+((capital_gains * (capitalism))*0.2),
+      capital_gains <= 0 ~ 0))
+    
+    #We calculate the total earnings from the capitalism (Remembering to subtract corporate tax)
+    capitalism_earnings = sum(case_when(
+      capital_gains > 0 ~ ((capital_gains * (capitalism))*0.8),
+      capital_gains <= 0 ~ 0))
+    
+    # /!\ /!\ CHANGES /!\ /!\ #
+    # The Government Tax Earning stay get a 15% subtraction are and a flat UBI rate is given out.
+    capital = capital + ubi + (((government_tax_earnings/50)*42.5) / N)
+    
+    #Distribute Capitalism to top 20%
+    capital = case_when(
+      prob < 0.8 ~ capital,
+      prob >= 0.8 ~ capital + (capitalism_earnings /(N*0.2)),
+      TRUE ~ pnorm(z_score))
+    
+    mapital[,i] <- capital
+    lucky[,i] <- luck
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "ubi + capitalism"
+  people$tax_range <- 0
+  people$ubi <- ubi
+  people$Event_Likelihood <- Event_Likelihood
+  people$w <- w
+  people$r <- r
+  people$K <- "Flat"
+  #people$talent2 <- people$talent
+  #people <- cbind(people,lucky)
+return(people)
+}
+
+#### RUNS ####
+#runs for different values of Event_Likelihoods with a paycheck of w=1 and an interest rate of r=0.1
+eco_ubi1_cap <- economy_ubi_cap(10000,80,0.001,1,0.05, ubi = 10,ubitax_range = c(.0, .5))
+eco_ubi2_cap <- economy_ubi_cap(10000,80,0.01,1,0.05, ubi = 10,ubitax_range = c(.0, .5))
+eco_ubi3_cap <- economy_ubi_cap(10000,80,0.1,1,0.05, ubi = 10,ubitax_range = c(.0, .5))
+eco_ubi4_cap <- economy_ubi_cap(10000,80,0.5,1,0.05, ubi = 10,ubitax_range = c(.0, .5))
+eco_ubi5_cap <- economy_ubi_cap(10000,80,0.9,1,0.05, ubi = 10,ubitax_range = c(.0, .5)) 
+
+
+#big dataframe to look at UBI before and after Capitalism + A baseline of the poortax model
+eco_UBI_Cap <- rbind(eco_ubi1_10,eco_ubi2_10,eco_ubi3_10,eco_ubi4_10,eco_ubi5_10,eco_ubi1_cap,eco_ubi2_cap,eco_ubi3_cap,eco_ubi4_cap,eco_ubi5_cap, eco_poortax1,eco_poortax2,eco_poortax3,eco_poortax4,eco_poortax5,eco_poortax1_cap,eco_poortax2_cap,eco_poortax3_cap,eco_poortax4_cap,eco_poortax5_cap)
+
+#Dataframe for Viz
+CapUbiViz <- rbind(eco_ubi1_cap,eco_ubi2_cap,eco_ubi3_cap,eco_ubi4_cap,eco_ubi5_cap)
+
+#### PLOTS ####
+#comparing the Capitalist UBI model to the ubi one (with fix w = 1 and fix r = 1)
+ggplot(eco_UBI_Cap, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood)
+
+#Distribution of talent over capital in Ubi Cap Model
+ggplot(CapUbiViz, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood)
+
+
+
+
+
+
+
+
+
+
+### EXTRA
+# POOR Tax + Capitalism
+economy_poortax_cap <- function(N,timemax,Event_Likelihood,w,r, capitalism_range = .4, poortax_range = c(.001, .01)){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),
+                         timemax*N,
+                         replace = TRUE, 
+                         prob = c(Event_Likelihood/2,Event_Likelihood/2,(1-Event_Likelihood))), nrow = N)
+
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = timemax)
+  lucky <- matrix(nrow = N,ncol = timemax)
+  
+  for (i in 1:timemax){
+
+    capital <- capital + capital*r
+    
+    m <- mean(capital)
+    std <- sd(capital)
+    z_score <- (capital - m) / std
+    prob = case_when(
+      std == 0 ~ .5,
+      TRUE ~ pnorm(z_score))
+    
+   poortax <- case_when(
+      prob <= .5 ~ poortax_range[2] - diff(poortax_range) * prob *2,
+      prob > .5 ~ 0,
+      TRUE ~ pnorm(z_score))
+   
+   #Adding Capitalism
+    capitalism <- case_when(
+      prob < .8 ~ capitalism_range,
+      prob >= .8 ~ 0.0,
+      TRUE ~ pnorm(z_score))
+    
+    #We calculate people's profit according to the usual system developped in earlier models
+    capital_gains = case_when(
+      type[,i] == 0 ~ w*people$talent,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  capital*(people$talent),
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  capital*(people$talent - 1)))
+
+    luck = case_when(
+      type[,i] == 0 ~ 0,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  1,
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  -1))
+    
+    #After caculating people's profit for this time step, you add it to their capital while adding capitalism
+    capital = case_when(
+      capital_gains > 0 ~ capital*(1-poortax) + capital_gains *(1-capitalism),
+      capital_gains <= 0 ~ capital*(1-poortax) + capital_gains *(1-capitalism)) #if one's profit is negative u still get taxed as poor
+    
+    #We calculate the total earnings from the capitalism (No Tax on Capitalism, as there's no taxsystem setup)
+    capitalism_earnings = sum(case_when(
+      capital_gains > 0 ~ capital_gains * (capitalism),
+      capital_gains <= 0 ~ 0))
+   
+    #Distribute Capitalism to top 20%
+    capital = case_when(
+      prob < .8 ~ capital,
+      prob >= .8 ~ capital + (capitalism_earnings /(N*0.2)),
+      TRUE ~ pnorm(z_score))
+    
+    
+    mapital[,i] <- capital
+    lucky[,i] <- luck
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "poortax + Capitalism"
+  people$tax_range <- 0
+  people$ubi <- 0
+  people$Event_Likelihood <- Event_Likelihood
+  people$w <- w
+  people$r <- r
+  people$K <- "Flat"
+  #people$talent2 <- people$talent
+  #people <- cbind(people,lucky)
+return(people)
+}
+
+#### RUNS ####
+#runs for different values of Event_Likelihoods with a paycheck of w=1 and an interest rate of r=0.1
+eco_poortax1_cap <- economy_poortax_cap(10000,80,0.001,1,0.05)
+eco_poortax2_cap <- economy_poortax_cap(10000,80,0.01,1,0.05)
+eco_poortax3_cap <- economy_poortax_cap(10000,80,0.1,1,0.05)
+eco_poortax4_cap <- economy_poortax_cap(10000,80,0.5,1,0.05)
+eco_poortax5_cap <- economy_poortax_cap(10000,80,0.9,1,0.05) 
+
+#Dataframes for Viz
+CapPoorViz <- rbind(eco_poortax1_cap,eco_poortax2_cap,eco_poortax3_cap,eco_poortax4_cap,eco_poortax5_cap)
+CapPoorAndPoorViz <- rbind(eco_poortax1_cap,eco_poortax2_cap,eco_poortax3_cap,eco_poortax4_cap,eco_poortax5_cap,eco_poortax1,eco_poortax2,eco_poortax3,eco_poortax4,eco_poortax5)
+
+
+#Distribution of talent over capital in the poor Models
+ggplot(CapPoorAndPoorViz, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood)
+#alltough this plot seems unintuitive, it shows how giving money to the top precentage is actually a strategy that favours lucky people more than the talented, in a system that that give talented a slight edge.
+
+
+#Dataframe for Viz
+CapUbiPoorDistViz <- rbind(eco_ubi1_cap,eco_ubi2_cap,eco_ubi3_cap,eco_ubi4_cap,eco_ubi5_cap,eco_poortax1_cap,eco_poortax2_cap,eco_poortax3_cap,eco_poortax4_cap,eco_poortax5_cap,eco_dist1_cap,eco_dist2_cap,eco_dist3_cap,eco_dist4_cap,eco_dist5_cap)
+ggplot(CapUbiPoorDistViz, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood) + labs(title="Distribution of wealth over Talent across different Event_likelihoods ",y="Capital/Succes",x="Talent")+geom_smooth(method = "lm")
+```
+
+
+
+# These codes finds the Min, Max & Median
+```{r}
+##### Input Dataframes
+#CapUbiViz
+#CapPoorViz
+#CapDistViz
+####
+#Dist
+CapDistViz1 <- filter(CapDistViz, Event_Likelihood == "0.1")
+Distmed.1 <- median(CapDistViz1$`80`)
+Distmin.1 <- min(CapDistViz1$`80`)
+Distimemax.1 <- max(CapDistViz1$`80`)
+CapDistViz2 <- filter(CapDistViz, Event_Likelihood == "0.9")
+Distmed.9 <- median(CapDistViz2$`80`)
+Distmin.9 <- min(CapDistViz2$`80`)
+Distimemax.9 <- max(CapDistViz2$`80`)
+#UBI
+CapUbiViz1 <- filter(CapUbiViz, Event_Likelihood == "0.1")
+UBImed.1 <- median(CapUbiViz1$`80`)
+UBImin.1 <- min(CapUbiViz1$`80`)
+UBImax.1 <- max(CapUbiViz1$`80`)
+CapUbiViz2 <- filter(CapUbiViz, Event_Likelihood == "0.9")
+UBImed.9 <- median(CapUbiViz2$`80`)
+UBImin.9 <- min(CapUbiViz2$`80`)
+UBImax.9 <- max(CapUbiViz2$`80`)
+#Poor
+CapPoorViz1 <- filter(CapPoorViz, Event_Likelihood == "0.1")
+Poormed.1 <-median(CapPoorViz1$`80`)
+Poormin.1 <-min(CapPoorViz1$`80`)
+Poormax.1 <-max(CapPoorViz1$`80`)
+CapPoorViz2 <- filter(CapPoorViz, Event_Likelihood == "0.9")
+Poormed.9 <- median(CapPoorViz2$`80`)
+Poormin.9 <- min(CapPoorViz2$`80`)
+Poormax.9 <- max(CapPoorViz2$`80`)
+
+poor1 <- cbind(Poormed.1,Poormin.1,Poormax.1,Poormed.9,Poormin.9,Poormax.9)
+UBI1 <- cbind(UBImed.1,UBImin.1,UBImax.1,UBImed.9,UBImin.9,UBImax.9)
+Dist1 <- cbind(Distmed.1,Distmin.1,Distimemax.1,Distmed.9,Distmin.9,Distimemax.9)
+finalm <- rbind(poor1,UBI1,Dist1)
+names <- c("Poor","UBI","Dist")
+finalm <- cbind(names,finalm)
+colnames(finalm)[1:7] <- c("Model","Median .1","Min .1","Max .1","Median .9","Min .9","Max .9")
+view(finalm)
+finalm
+```
+
+
+# These codes are indexing the Growth and Total Capital of the system
+```{r}
+#This code chunck investigates the system as a whole - The total Capital at each timestamp + the growth from timestamp to timestamp
+
+#Make GDP and Growth function
+SuperCapital <- function(df, taxlevel, Chances){
+datatime<- filter(df, Event_Likelihood == Chances)
+
+#print(unique(datatime$tax_range))
+#print(unique(datatime$Event_Likelihood))
+#print(length(datatime$ID))
+#print(colnames(datatime))
+
+datatime1 = datatime[c(3:83)]
+#print(colnames(datatime))
+GDP = colSums(datatime1)
+
+Growth = c(0,rep(NA,80))
+for (i in 2:81){
+Growth[i] = (GDP[i]/GDP[i-1] - 1) * 100
+}
+
+ecostuff <- cbind(GDP,Growth, taxlevel,Chances)
+return(ecostuff)
+}
+
+#End Dataframe
+ecostuff_final <- data.frame()
+GDP <- 0
+Growth <- 0
+taxlevel <- 0
+Chances <- 0
+ecostuff_final <- cbind(GDP, Growth, taxlevel, Chances)
+ecostuff_final
+
+#Make Lists
+Taxielevels = c(.5)
+ChancieLevels = c(0.001,0.01,0.1,0.5,0.9)
+####### -> Input Dataframe
+
+#CapUbiViz
+#CapPoorViz
+#CapDistViz
+
+df = CapUbiViz
+######
+
+#Loop In Loop
+for (c in ChancieLevels){ #loop over list of files
+for (t in Taxielevels){ #loop over list of files
+cool <- SuperCapital(df, t, c)
+cool <- data.frame(cool)
+ecostuff_final <- rbind(ecostuff_final,cool)  
+}}
+#Remove First Line
+ecostuff_final <- ecostuff_final[-1, ]
+view(ecostuff_final)
+
+time <- rep(1:81, 5)
+ecostuff_final <- cbind(ecostuff_final,time)
+colnames(ecostuff_final)[4] <- "Event_likelihood"
+
+g1 <- ggplot(ecostuff_final, aes(x=time,y=GDP, color=Event_likelihood)) +
+  geom_point() + labs(title="UBI model + capitalism for different Event_likelihoods",y="GDP",x="Time") +
+  scale_y_continuous(trans='log10')
+
+g2 <- ggplot(ecostuff_final, aes(x=time,y=Growth, color=Event_likelihood)) +
+  geom_point() + labs(title="UBI model + capitalism for different Event_likelihoods",y="Growth in %",x="Time")
+plot_grid(g1,g2)
+```
+
+
+
+# Talent and Luck Trajectories
+```{r}
+##### Input Dataframes
+#CapUbiViz
+#CapPoorViz
+#CapDistViz
+#####
+
+
+#Sum of luck
+#These codes plots the trajectories of capital in time across the distribution of talent 
+dff <- CapDistViz # Already split to only include 1 condition
+dff <- split(dff, dff$Event_Likelihood)# Split by Event_Likelihood
+
+dff1 <- as.data.frame(dff[3])
+dff11 <- dff1[,1:2]#take ID and Talent
+dff12 <- dff1[,92:171]#Take Luck
+dff1 <- cbind(dff11,dff12)#Bind together
+dff1 <- melt(dff1, id.vars = colnames(dff1)[1:2], value.name = "valuename")
+summary(dff1) # We make it into a long format that can be plotted
+colnames(dff1)[1] <- "ID"
+colnames(dff1)[2] <- "talent"
+colnames(dff1)[3] <- "timeseries"
+#Find Sum Of most Lucky people
+SumOfLuck <- tapply(dff1$valuename, dff1$ID, FUN=sum)
+
+ggplot(dff1, aes(x=timeseries,y=valuename, color=talent,group=ID)) +
+  geom_line()
+#This Is Way To clutered
+#What about
+#very Talented and very untalented
+dff1X <- filter(dff1,talent >= 0.75 |talent <= 0.35)
+#very Talented and very untalented Distribution for Event_Likelihood 0.001
+ggplot(dff1X, aes(x=timeseries,y=valuename, color=talent,group=ID)) + geom_line() 
+#Still to many
+
+#Lucky and Unlucky
+view(SumOfLuck)
+tail(sort(SumOfLuck),10)
+head(sort(SumOfLuck),10)
+#Now Let's Plot the most unlucky people
+dff1Unlucky <- filter(dff1,ID==8548)
+ggplot(dff1Unlucky, aes(x=timeseries,y=valuename, color=talent,group=ID)) + geom_line() + labs(title="Outcome of events at Event_likelihood of 0.1 ",y="1 = Good luck & -1 = Bad Luck",x="Time")
+#Now Let's Plot the most lucky people
+dff1lucky <- filter(dff1,ID==8559)
+ggplot(dff1lucky, aes(x=timeseries,y=valuename, color=talent,group=ID)) + geom_line() + labs(title="Outcome of events at Event_likelihood of 0.1 ",y="1 = Good luck & -1 = Bad Luck",x="Time")
+#Now Let's Plot a person neither lucky nor unlucky
+dff1neutral <- filter(dff1,ID==4)
+ggplot(dff1neutral, aes(x=timeseries,y=valuename, color=talent,group=ID)) + geom_line() 
+
+
+######Talent and Capital Trajectories#######
+
+#These codes plots the trajectories of capital in time across the distribution of talent 
+df <- CapDistViz # Already split to only include 1 condition
+df <- split(df, df$Event_Likelihood)# Split by Event_Likelihood
+
+df1 <- as.data.frame(df[3])
+df1 <- df1[,1:83]# Make to talent and capitals
+#///CHANGES\\\#
+df1 <- cbind(SumOfLuck,df1) #bind the sum of luck created earlier
+df1 <- melt(df1, id.vars = colnames(df1)[1:3], variable.name = "Sample var", value.name = "valuename")
+summary(df1) # We make it into a long format that can be plotted
+colnames(df1)[1] <- "SumOfLuck"
+colnames(df1)[2] <- "ID"
+colnames(df1)[3] <- "talent"
+colnames(df1)[4] <- "timeseries"
+
+# We make plots
+#very Talented and very untalented
+df1X <- filter(df1,talent >= 0.90 |talent <= 0.30)
+#very Talented and very untalented Distribution for Event_Likelihood 0.1
+ggplot(df1X, aes(x=timeseries,y=valuename, color=SumOfLuck,group=ID)) +
+  geom_line() + labs(title="Trajectores of talent at Event_likelihood of 0.1",y="Capital/Success",x="Time")
+
+#Plot Wealth for unlucky and lucky talented people
+df1talentedunlucky <- filter(df1,talent >= 0.76 & SumOfLuck <= -3 | talent >= 0.7567 & SumOfLuck >= 8)
+mmm1<-ggplot(df1talentedunlucky, aes(x=timeseries,y=valuename, color=SumOfLuck,group=ID)) +
+  geom_line() + labs(title="Wealth for unlucky and lucky talented people",y="Capital/Success",x="Time")
+
+#Plot Wealth for unlucky and lucky untalented people
+df1untalentedlucky <- filter(df1,talent <= 0.42 & SumOfLuck >= 4 | talent <= 0.46 & SumOfLuck <= -7)
+mmm2<-ggplot(df1untalentedlucky, aes(x=timeseries,y=valuename, color=SumOfLuck,group=ID)) +
+  geom_line() + labs(title="Wealth for unlucky and lucky untalented people",y="Capital/Success",x="Time")
+plot_grid(mmm1,mmm2)
+```
+
+
+
+#Simulations -> For Sanity Checks
+```{r}
+####### -> Input functions
+eco_poortax5_cap <- economy_poortax_cap(10000,80,c,1,0.05) 
+eco_dist5_cap <- economy_distribution_cap(10000,80,c,1,0.05, tax_range = c(.0, .5)) 
+eco_ubi5_cap <- economy_ubi_cap(10000,80,c,1,0.05, ubi = 10,ubitax_range = c(.0, .5)) 
+function(N,timemax,Event_Likelihood,w,r, capitalism_range = .4, poortax_range = c(.001, .01))
+function(N,timemax,Event_Likelihood,w,r,tax_range, capitalism_range = .4, poortax_range = c(.001, .01))
+function(N,timemax,Event_Likelihood,w,r,ubi, ubitax_range, capitalism_range = .4, poortax_range = c(.001, .01))
+######
+
+### MULTIPLE SIMULATIONS - Distributiuon + Capitalism
+#Firstly, we maybe don't need so many simulations since there isn't much difference in such a little system and we're interested in the final spread at timestamp 80 that doesn't vary much
+#This Functions add n-number of runs through the simulation
+Simulator <- function(N,timemax,Event_Likelihood,w,r,tax_range,ngames){
+  game <- economy_distribution_cap(N,timemax,Event_Likelihood,w,r,tax_range, capitalism_range = .4, poortax_range = c(.001, .01))
+  game$ngame <- 1
+  for (i in 2:ngames) {
+    anothergame <- economy_distribution_cap(N,timemax,Event_Likelihood,w,r,tax_range, capitalism_range = .4, poortax_range = c(.001, .01))
+    anothergame$ngame <- i
+    game <- rbind(game,anothergame)
+  }
+  return(game)
+}
+
+#End Dataframe
+Sim_final <- data.frame()
+#Make list
+ChancieLevels = c(0.001,0.01,0.1,0.5,0.9)
+
+for (c in ChancieLevels){ #loop over list of files
+cool <- Simulator(10000,80,c,1,0.05,tax_range = c(.0, .5),5)
+cool <- data.frame(cool)
+Sim_final <- rbind(Sim_final,cool)  
+}
+Wealth <- Sim_final 
+ggplot(Wealth, aes(talent,`X80`, color=ngame)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood) + labs(title="Distribution of wealth over Talent across different Event_likelihoods - Five Simulations ",y="Capital/Succes",x="Talent")+geom_smooth(method = "lm")
+
+
+
+####
+####
+####
+####
+####
+####
+####
+
+
+### MULTIPLE SIMULATIONS - UBI + Capitalism
+#Firstly, we maybe don't need so many simulations since there isn't much difference in such a little system and we're interested in the final spread at timestamp 80 that doesn't vary much
+#This Functions add n-number of runs through the simulation
+Simulator <- function(N,timemax,Event_Likelihood,w,r,ngames){
+  game <- economy_ubi_cap(10000,80,c,1,0.05, ubi = 10,ubitax_range = c(.0, .5)) 
+  game$ngame <- 1
+  for (i in 2:ngames) {
+    anothergame <- economy_ubi_cap(10000,80,c,1,0.05, ubi = 10,ubitax_range = c(.0, .5)) 
+    anothergame$ngame <- i
+    game <- rbind(game,anothergame)
+  }
+  return(game)
+}
+
+#End Dataframe
+Sim_final <- data.frame()
+#Make list
+ChancieLevels = c(0.001,0.01,0.1,0.5,0.9)
+
+for (c in ChancieLevels){ #loop over list of files
+cool <- Simulator(10000,80,c,1,0.05,5)
+cool <- data.frame(cool)
+Sim_final <- rbind(Sim_final,cool)  
+}
+UBII <- Sim_final 
+
+ggplot(UBII, aes(talent,`X80`, color=ngame)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood) + labs(title="Distribution of wealth over Talent across different Event_likelihoods - Five Simulations",y="Capital/Succes",x="Talent")+geom_smooth(method = "lm")
+
+
+
+
+####
+####
+####
+####
+####
+####
+####
+
+
+### MULTIPLE SIMULATIONS - Poortax + Capitalism
+#Firstly, we maybe don't need so many simulations since there isn't much difference in such a little system and we're interested in the final spread at timestamp 80 that doesn't vary much
+#This Functions add n-number of runs through the simulation
+Simulator <- function(N,timemax,Event_Likelihood,w,r,ngames){
+  game <- economy_distribution_cap(10000,80,c,1,0.05, tax_range = c(.0, .5)) 
+  game$ngame <- 1
+  for (i in 2:ngames) {
+    anothergame <- economy_distribution_cap(10000,80,c,1,0.05, tax_range = c(.0, .5)) 
+    anothergame$ngame <- i
+    game <- rbind(game,anothergame)
+  }
+  return(game)
+}
+
+#End Dataframe
+Sim_final <- data.frame()
+#Make list
+ChancieLevels = c(0.001,0.01,0.1,0.5,0.9)
+
+for (c in ChancieLevels){ #loop over list of files
+cool <- Simulator(10000,80,c,1,0.05,5)
+cool <- data.frame(cool)
+Sim_final <- rbind(Sim_final,cool)  
+}
+Poor <- Sim_final 
+
+ggplot(Poor, aes(talent,`X80`, color=ngame)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood) + labs(title="Distribution of wealth over Talent across different Event_likelihoods - Five Simulations",y="Capital/Succes",x="Talent")+geom_smooth(method = "lm")
+
+
+
+
+```
+
+
+
+
+
+
+
+######EXTRA MODELS - For Future Work######
+
+
+RICH GET LUCKIER
+Now, rich agents have a greater chance for an event to be a good event.
+On the other side, poor agents have a harder time getting lucky
+```{r}
+#### FUNCTION ####
+economy_richluck <- function(N,timemax,Event_Likelihood,w,r,poortax_range = c(.001, .01)){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  # /!\ /!\ BIG CHANGES /!\ /!\ #
+  #Now probabilities of events are dynamic (depend on the previous timesteps) and individual
+  #therefore, we cannot generate all events happenning in time at once
+  # ==> we cannot use the "type" matrix previously used, and need to generate events in the loop
+  #This means worse performances and longer time to run.
+  
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = timemax)
+  for (i in 1:timemax){
+
+    capital <- capital + capital*r
+    
+    #We extract the mean capital and standard deviation before a timestep
+    m <- mean(capital)
+    std <- sd(capital)
+    #We calculate standardized z scores in order to rank everyone's capital according to the mean and standard deviation
+    z_score <- (capital - m) / std
+    #and we calculate everyone's probability of good event using the cumulative probability function. The higher your capital is, the higher your z score is, and the closer to 1 your probability will be. If your capital is the same as the mean capital, your z score is 0 and your probability is 0.5. 
+    prob_luck = case_when(
+      std == 0 ~ 0.5, #if everyone has the same capital, std == 0, therefore it's random
+      TRUE ~ pnorm(z_score))
+    
+    #here, you create the event vector, where probability of good and bad events depends on the individual probability value calculated above
+    event = purrr::map_dbl(prob_luck, ~ sample(c(1,-1,0), 1, replace = TRUE,
+                                         prob = c(Event_Likelihood * .x, Event_Likelihood * (1-.x), 1-Event_Likelihood)))
+
+    #case_when is a simple way to make conditional statements.
+    #Syntax is sexier than using cascades of ifelse. Thanks Malte for pointing it out!
+    capital = case_when(
+      #if no event
+      event == 0 ~ capital+w*people$talent,
+      #if good event
+      event == 1 ~ ifelse(runif(N) < people$talent,
+                                  capital*(1+people$talent),
+                                  capital),
+      #if bad eevent
+      event == -1 ~ ifelse(runif(N) < people$talent,
+                                  capital,
+                                  capital*people$talent))
+
+    mapital[,i] <- capital
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "richluck"
+  people$Event_Likelihood <- Event_Likelihood
+  people$w <- w
+  people$r <- r
+return(people)
+}
+
+#### RUNS ####
+#runs for different values of Event_Likelihoods with a paycheck of w=1 and an interest rate of r=0.1
+eco_richluck1 <- economy_richluck(10000,80,0.001,1,0.05)
+eco_richluck2 <- economy_richluck(10000,80,0.01,1,0.05)
+eco_richluck3 <- economy_richluck(10000,80,0.1,1,0.05)
+eco_richluck4 <- economy_richluck(10000,80,0.5,1,0.05)
+eco_richluck5 <- economy_richluck(10000,80,0.9,1,0.05) 
+#big dataframe to compare richluck and interest model
+eco_RLvsI <- rbind(eco_richluck1,eco_richluck2,eco_richluck3,eco_richluck4,eco_richluck5, eco_int11,eco_int12,eco_int13,eco_int14,eco_int15)
+
+#### PLOTS ####
+#comparing the richluck model to the interest rate one (with fix w = 1 and fix r = 1)
+ggplot(eco_RLvsI, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.5,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood)
+```
+
+
+#Influence Equality
+UNEVEN STARTINGPOINT
+the paper and the scenarios above assume everyone starts with the same amount of capital. What will happen if the amount of capital is a random number drawn from a distribution? Uniform, normal, poisson or log-normal?
+```{r}
+#All the different starting distributions
+#Flat distribution of 10 For everyone
+r1 <- plot(rep(10,10000))
+#Normal 
+r2 <- plot(rnorm(10000,10,2)) 
+#Poisson 
+r3 <- plot(rpois(10000,10)) 
+#Log 
+r4 <- plot(rlnorm(10000,log(10),log(4)))
+
+plot_grid(r1,r2,r3,r4)
+
+#######Wealth Distribution#########
+###Wealth Model
+economy_distribution_UNEQST <- function(K,L,N,timemax,Event_Likelihood,w,r,tax_range, poortax_range = c(.001, .01)){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- L
+  
+  type <- matrix(sample(c(1,-1,0),
+                         timemax*N,
+                         replace = TRUE, 
+                         prob = c(Event_Likelihood/2,Event_Likelihood/2,(1-Event_Likelihood))), nrow = N)
+
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = timemax)
+   # /!\ /!\ CHANGES /!\ /!\ #
+  #We add a new dataframe for luck
+  lucky <- matrix(nrow = N,ncol = timemax)
+  
+  for (i in 1:timemax){
+
+    capital <- capital + capital*r
+    
+    #We calculate z scores, cumulative probabilites and tax rate, as in the previous model
+    m <- mean(capital)
+    std <- sd(capital)
+    z_score <- (capital - m) / std
+    prob = case_when(
+      std == 0 ~ .5,
+      TRUE ~ pnorm(z_score))
+    tax = tax_range[1] + diff(tax_range) * prob
+    #we calculate the poortaxes you have to pay
+    #if probability is above the mean, you have no taxes
+    #if probability is very low, your taxes are close to the higher boundaries
+   poortax <- case_when(
+      prob <= .5 ~ poortax_range[2] - diff(poortax_range) * prob *2,
+      prob > .5 ~ 0,
+      TRUE ~ pnorm(z_score))
+    
+    #We calculate people's profit according to the usual system developped in earlier models
+    capital_gains = case_when(
+      type[,i] == 0 ~ w*people$talent,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  capital*(people$talent),
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  capital*(people$talent - 1)))
+    # /!\ /!\ CHANGES /!\ /!\ #
+    #We calculate people's luck outcome
+    luck = case_when(
+      type[,i] == 0 ~ 0,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  1,
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  -1))
+    
+    #We calculate people's new capital according to profit and tax rate
+    capital = case_when(
+      capital_gains > 0 ~ capital*(1-poortax) + capital_gains * (1-tax),
+      capital_gains <= 0 ~ capital*(1-poortax) + capital_gains) #if one's profit is negative u still get taxed as poor
+    
+    #We calculate the total earnings from the taxes
+    government_tax_earnings = sum(case_when(
+      capital_gains > 0 ~ capital_gains * (tax),
+      capital_gains <= 0 ~ 0))
+    # redistribute the wealth equally! Everyone gets an equal piece of the total government tax earnings
+    capital = capital + ((government_tax_earnings / N))
+    
+    mapital[,i] <- capital
+    lucky[,i] <- luck
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "Wealth Dist"
+  people$tax_range <- tax_range[2] ##########################################<3############
+  people$ubi <- 0
+  people$Event_Likelihood <- Event_Likelihood
+  people$w <- w
+  people$r <- r
+  people$K <- K
+  # /!\ /!\ CHANGES /!\ /!\ #
+  #We Make rows and coloumns to plot luck
+  people$talent2 <- people$talent
+  people <- cbind(people,lucky)
+return(people)
+}
+
+
+
+#### RUNS ####
+#Normal plot(rnorm(10000,10,2)) rnorm(N,10,2)
+eco_dist1_N <- economy_distribution_UNEQST(K ="Normal", L = rnorm(10000,10,2),10000,80,0.001,1,0.05, tax_range = c(.0, .5))
+eco_dist2_N <- economy_distribution_UNEQST(K ="Normal",L = rnorm(10000,10,2),10000,80,0.01,1,0.05, tax_range = c(.0, .5))
+eco_dist3_N <- economy_distribution_UNEQST(K ="Normal",L = rnorm(10000,10,2),10000,80,0.1,1,0.05, tax_range = c(.0, .5))
+eco_dist4_N <- economy_distribution_UNEQST(K ="Normal",L = rnorm(10000,10,2),10000,80,0.5,1,0.05, tax_range = c(.0, .5))
+eco_dist5_N <- economy_distribution_UNEQST(K ="Normal",L = rnorm(10000,10,2),10000,80,0.9,1,0.05, tax_range = c(.0, .5)) 
+#Poisson plot(rpois(10000,10)) rpois(N,10)
+eco_dist1_P <- economy_distribution_UNEQST(K ="Poisson",L = rpois(10000,10),10000,80,0.001,1,0.05, tax_range = c(.0, .5))
+eco_dist2_P <- economy_distribution_UNEQST(K ="Poisson",L = rpois(10000,10),10000,80,0.01,1,0.05, tax_range = c(.0, .5))
+eco_dist3_P <- economy_distribution_UNEQST(K ="Poisson",L = rpois(10000,10),10000,80,0.1,1,0.05, tax_range = c(.0, .5))
+eco_dist4_P <- economy_distribution_UNEQST(K ="Poisson",L = rpois(10000,10),10000,80,0.5,1,0.05, tax_range = c(.0, .5))
+eco_dist5_P <- economy_distribution_UNEQST(K ="Poisson",L = rpois(10000,10),10000,80,0.9,1,0.05, tax_range = c(.0, .5)) 
+#Log plot(rlnorm(1000,log(10),log(3))) rlnorm(N,log(10),log(4)) #standard deviation of 4
+eco_dist1_L <- economy_distribution_UNEQST(K ="Log",L = rlnorm(10000,log(10),log(4)),10000,80,0.001,1,0.05, tax_range = c(.0, .5))
+eco_dist2_L <- economy_distribution_UNEQST(K ="Log",L = rlnorm(10000,log(10),log(4)),10000,80,0.01,1,0.05, tax_range = c(.0, .5))
+eco_dist3_L <- economy_distribution_UNEQST(K ="Log",L = rlnorm(10000,log(10),log(4)),10000,80,0.1,1,0.05, tax_range = c(.0, .5))
+eco_dist4_L <- economy_distribution_UNEQST(K ="Log",L = rlnorm(10000,log(10),log(4)),10000,80,0.5,1,0.05, tax_range = c(.0, .5))
+eco_dist5_L <- economy_distribution_UNEQST(K ="Log",L = rlnorm(10000,log(10),log(4)),10000,80,0.9,1,0.05, tax_range = c(.0, .5)) 
+
+#big dataframe to look at UBI before and after Capitalism + A baseline of the poortax model
+eco_Dist_UNEQST <- rbind(eco_dist1_N,eco_dist2_N,eco_dist3_N,eco_dist4_N,eco_dist5_N,eco_dist1_P,eco_dist2_P,eco_dist3_P,eco_dist4_P,eco_dist5_P,eco_dist1_L,eco_dist2_L,eco_dist3_L,eco_dist4_L,eco_dist5_L)
+
+#### PLOTS ####
+#comparing the distribution model to the ubi one (with fix w = 1 and fix r = 1)
+ggplot(eco_Dist_UNEQST, aes(talent,`80`, color=K)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood)
+
+
+
+
+
+
+#######UBI#########
+#### FUNCTION ####
+#UBI
+economy_ubi_UNEQST <- function(K,L,N,timemax,Event_Likelihood,w,r,ubi, ubitax_range, poortax_range = c(.001, .01)){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),
+                         timemax*N,
+                         replace = TRUE, 
+                         prob = c(Event_Likelihood/2,Event_Likelihood/2,(1-Event_Likelihood))), nrow = N)
+
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = timemax)
+  # /!\ /!\ CHANGES /!\ /!\ #
+  #We add a new dataframe for luck
+  lucky <- matrix(nrow = N,ncol = timemax)
+  
+  for (i in 1:timemax){
+
+    capital <- capital + capital*r
+    
+    #We calculate z scores, cumulative probabilites and tax rate, as in the previous model
+    m <- mean(capital)
+    std <- sd(capital)
+    z_score <- (capital - m) / std
+    prob = case_when(
+      std == 0 ~ .5,
+      TRUE ~ pnorm(z_score))
+    tax = ubitax_range[1] + diff(ubitax_range) * prob
+    #we calculate the poortaxes you have to pay
+    #if probability is above the mean, you have no taxes
+    #if probability is very low, your taxes are close to the higher boundaries
+   poortax <- case_when(
+      prob <= .5 ~ poortax_range[2] - diff(poortax_range) * prob *2,
+      prob > .5 ~ 0,
+      TRUE ~ pnorm(z_score))
+    
+    #We calculate people's profit according to the usual system developped in earlier models
+    capital_gains = case_when(
+      type[,i] == 0 ~ w*people$talent,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  capital*(people$talent),
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  capital*(people$talent - 1)))
+      # /!\ /!\ CHANGES /!\ /!\ #
+    #We calculate people's luck outcome
+    luck = case_when(
+      type[,i] == 0 ~ 0,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  1,
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  -1))
+    
+    #We calculate people's new capital according to profit and tax rate
+    capital = case_when(
+      capital_gains > 0 ~ capital*(1-poortax) + capital_gains * (1-tax),
+      capital_gains <= 0 ~ capital*(1-poortax) + capital_gains)#if one's profit is negative u still get taxed as poor
+    #We calculate people's new capital according to profit and tax rate
+     
+    #We calculate the total earnings from the taxes
+    government_tax_earnings = sum(case_when(
+      capital_gains > 0 ~ capital_gains * (tax),
+      capital_gains <= 0 ~ 0))
+    
+    # The Government Tax Earning stay get a 15% subtraction are and a flat UBI rate is given out.
+    capital = capital + ubi + (((government_tax_earnings/50)*42.5) / N)
+    
+    mapital[,i] <- capital
+    lucky[,i] <- luck
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "ubi"
+  people$tax_range <- 0
+  people$ubi <- ubi
+  people$Event_Likelihood <- Event_Likelihood
+  people$w <- w
+  people$r <- r
+  people$K <- K
+  # /!\ /!\ CHANGES /!\ /!\ #
+  #We Make rows and coloumns to plot luck
+  people$talent2 <- people$talent
+  people <- cbind(people,lucky)
+  
+return(people)
+}
+
+#### RUNS ####
+#Normal plot(rnorm(10000,10,2)) rnorm(N,10,2)
+eco_ubi1_N <- economy_ubi_UNEQST(K ="Normal", L = rnorm(10000,10,2),10000,80,0.001,1,0.05,  ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi2_N <- economy_ubi_UNEQST(K ="Normal",L = rnorm(10000,10,2),10000,80,0.01,1,0.05,  ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi3_N <- economy_ubi_UNEQST(K ="Normal",L = rnorm(10000,10,2),10000,80,0.1,1,0.05,  ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi4_N <- economy_ubi_UNEQST(K ="Normal",L = rnorm(10000,10,2),10000,80,0.5,1,0.05,  ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi5_N <- economy_ubi_UNEQST(K ="Normal",L = rnorm(10000,10,2),10000,80,0.9,1,0.05,  ubi = 1,ubitax_range = c(.0, .5)) 
+#Poisson plot(rpois(10000,10)) rpois(N,10)
+eco_ubi1_P <- economy_ubi_UNEQST(K ="Poisson",L = rpois(10000,10),10000,80,0.001,1,0.05,  ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi2_P <- economy_ubi_UNEQST(K ="Poisson",L = rpois(10000,10),10000,80,0.01,1,0.05,  ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi3_P <- economy_ubi_UNEQST(K ="Poisson",L = rpois(10000,10),10000,80,0.1,1,0.05,  ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi4_P <- economy_ubi_UNEQST(K ="Poisson",L = rpois(10000,10),10000,80,0.5,1,0.05,  ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi5_P <- economy_ubi_UNEQST(K ="Poisson",L = rpois(10000,10),10000,80,0.9,1,0.05,  ubi = 1,ubitax_range = c(.0, .5)) 
+#Log plot(rlnorm(1000,log(10),log(3))) rlnorm(N,log(10),log(4)) #standard deviation of 4
+eco_ubi1_L <- economy_ubi_UNEQST(K ="Log",L = rlnorm(10000,log(10),log(4)),10000,80,0.001,1,0.05,  ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi2_L <- economy_ubi_UNEQST(K ="Log",L = rlnorm(10000,log(10),log(4)),10000,80,0.01,1,0.05,  ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi3_L <- economy_ubi_UNEQST(K ="Log",L = rlnorm(10000,log(10),log(4)),10000,80,0.1,1,0.05,  ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi4_L <- economy_ubi_UNEQST(K ="Log",L = rlnorm(10000,log(10),log(4)),10000,80,0.5,1,0.05,  ubi = 1,ubitax_range = c(.0, .5))
+eco_ubi5_L <- economy_ubi_UNEQST(K ="Log",L = rlnorm(10000,log(10),log(4)),10000,80,0.9,1,0.05,  ubi = 1,ubitax_range = c(.0, .5)) 
+
+#big dataframe to look at UBI before and after Capitalism + A baseline of the poortax model
+eco_UBI_UNEQST <- rbind(eco_ubi1_N,eco_ubi2_N,eco_ubi3_N,eco_ubi4_N,eco_ubi5_N,eco_ubi1_P,eco_ubi2_P,eco_ubi3_P,eco_ubi4_P,eco_ubi5_P,eco_ubi1_L,eco_ubi2_L,eco_ubi3_L,eco_ubi4_L,eco_ubi5_L)
+
+#### PLOTS ####
+#comparing the distribution model to the ubi one (with fix w = 1 and fix r = 1)
+ggplot(eco_UBI_UNEQST, aes(talent,`80`, color=K)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood)
+```
+
+
+SOCIAL SAFETY NET
+Now, capital cannot decrease below the starting rate
+```{r}
+#### FUNCTION ####
+economy_safenet <- function(N,timemax,Event_Likelihood,w,r, poortax_range = c(.001, .01)){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),timemax*N, replace = TRUE,prob = c(Event_Likelihood/2,Event_Likelihood/2,(1-Event_Likelihood))), nrow = N)
+  
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = timemax)
+  
+  for (i in 1:timemax){
+    capital <- capital + capital*r
+    
+    m <- mean(capital)
+    std <- sd(capital)
+    z_score <- (capital - m) / std
+    prob = case_when(
+      std == 0 ~ .5,
+      TRUE ~ pnorm(z_score))
+    
+   poortax <- case_when(
+      prob <= .5 ~ poortax_range[2] - diff(poortax_range) * prob *2,
+      prob > .5 ~ 0,
+      TRUE ~ pnorm(z_score))
+
+   #We calculate people's profit according to the usual system developped in earlier models
+    capital_gains = case_when(
+      type[,i] == 0 ~ w*people$talent,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  capital*(people$talent),
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  capital*(people$talent - 1)))
+
+    capital = case_when(
+      capital_gains > 0 ~ capital*(1-poortax) + capital_gains ,
+      capital_gains <= 0 ~ capital*(1-poortax) + capital_gains ) #if one's profit is negative u still get taxed as poor
+    
+    # /!\ /!\ CHANGE /!\ /!\ #
+    #If you go below the starting value, we give you enough to get back there
+    capital <- ifelse(capital < 10, 10, capital)
+    #After caculating people's profit for this time step, you add it to their capital while adding taxes
+    
+    
+    mapital[,i] <- capital
+  }
+  
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "safety"
+  people$tax_range <- 0
+  people$ubi <- 0 
+  people$Event_Likelihood <- Event_Likelihood
+  people$w <- w
+  people$r <- r
+  people$K <- "Flat"
+return(people)
+}
+
+#### RUNS ####
+#runs for different values of Event_Likelihoods with a paycheck of w=1 and an interest rate of r=0.1
+eco_safe1 <- economy_safenet(10000,80,0.001,1,0.05)
+eco_safe2 <- economy_safenet(10000,80,0.01,1,0.05)
+eco_safe3 <- economy_safenet(10000,80,0.1,1,0.05)
+eco_safe4 <- economy_safenet(10000,80,0.5,1,0.05)
+eco_safe5 <- economy_safenet(10000,80,0.9,1,0.05) 
+#big dataframe to compare paycheck and interest model
+eco_SNvsP <- rbind(eco_safe1,eco_safe2,eco_safe3,eco_safe4,eco_safe5, eco_poortax1,eco_poortax2,eco_poortax3,eco_poortax4,eco_poortax5)
+
+#### PLOTS ####
+#comparing the paycheck model to the interest rate one (with fix w = 1 and fix r = 0.1)
+ggplot(eco_SNvsP, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_wrap(~Event_Likelihood)
+```
+
+TAX SYSTEM MODEL
+Now, a tax system is in place.
+***********This one is a bit different from the one in the article, in the sense that taxes are calculated on profit, not capital***************
+```{r}
+#### FUNCTION ####
+#here, new variable: tax_range -> the range of possible tax you can get, the poorest will have to pay the lowest number, while the richest will have to pay the highest number. 0.1 to 0.45 means you have to pay between 10% and 45% of your profit every round.
+economy_tax <- function(N,timemax,Event_Likelihood,w,r, tax_range = c(.0, .45), poortax_range = c(.001, .01)){
+  people <-  as_tibble(matrix(rep(1:N),N,1))
+  colnames(people) <- c("ID")
+  people$talent <- rnorm(N,0.6,0.1)
+  people$Kapital <- rep(10,N)
+  
+  type <- matrix(sample(c(1,-1,0),
+                         timemax*N,
+                         replace = TRUE, 
+                         prob = c(Event_Likelihood/2,Event_Likelihood/2,(1-Event_Likelihood))), nrow = N)
+
+  capital <- people$Kapital
+  mapital <- matrix(nrow = N,ncol = timemax)
+  
+  
+  for (i in 1:timemax){
+
+    capital <- capital + capital*r
+    
+    # /!\ /!\ BIG CHANGES /!\ /!\ #
+    #We calculate z scores and cumulative probabilites, as in the previous model
+    m <- mean(capital)
+    std <- sd(capital)
+    z_score <- (capital - m) / std
+    prob = case_when(
+      std == 0 ~ .5,
+      TRUE ~ pnorm(z_score))
+    
+    #we calculate the taxes you have to pay
+    #if probability is very low, your taxes are very close to the lower boundaries
+    #if probability is very high, your taxes are close to the higher boundaries
+    #examples: for tax range of 0.1 - 0.4, if prob = 0.01, tax = 0.1 + 0.3*0.01 = 0.103
+    #for tax range of 0.1 - 0.4, if prob = 0.99, tax = 0.1 + 0.3*0.99 = 0.397
+    tax = tax_range[1] + diff(tax_range) * prob
+    #we calculate the poortaxes you have to pay
+    #if probability is above the mean, you have no taxes
+    #if probability is very low, your taxes are close to the higher boundaries
+   poortax <- case_when(
+      prob <= .5 ~ poortax_range[2] - diff(poortax_range) * prob *2,
+      prob > .5 ~ 0,
+      TRUE ~ pnorm(z_score))
+    
+    #We calculate people's profit according to the usual system developped in earlier models
+    capital_gains = case_when(
+      type[,i] == 0 ~ w*people$talent,
+      
+      type[,i] == 1 ~ ifelse(runif(N) < people$talent,
+                                  capital*(people$talent),
+                                  0),
+      
+      type[,i] == -1 ~ ifelse(runif(N) < people$talent,
+                                  0,
+                                  capital*(people$talent - 1)))
+    
+    #After caculating people's profit for this time step, you add it to their capital while substracting taxes
+    capital = case_when(
+      capital_gains > 0 ~ capital*(1-poortax) + capital_gains * (1-tax),
+      capital_gains <= 0 ~ capital*(1-poortax) + capital_gains ) #if one's profit is negative u still get taxed as poor
+    
+    mapital[,i] <- capital
+  }
+
+  #Adding a few column for data viz' later on
+  people <- cbind(people,mapital)
+  people$condition <- "tax"
+  people$tax_range <- 0
+  people$ubi <- 0
+  people$Event_Likelihood <- Event_Likelihood
+  people$w <- w
+  people$r <- r
+  people$K <- "Flat"
+return(people)
+}
+
+#### RUNS ####
+#runs for different values of Event_Likelihoods with a paycheck of w=1 and an interest rate of r=0.1
+eco_tax1 <- economy_tax(10000,80,0.001,1,0.05)
+eco_tax2 <- economy_tax(10000,80,0.01,1,0.05)
+eco_tax3 <- economy_tax(10000,80,0.1,1,0.05)
+eco_tax4 <- economy_tax(10000,80,0.5,1,0.05)
+eco_tax5 <- economy_tax(10000,80,0.9,1,0.05) 
+#big dataframe to compare tax and interest model
+eco_TvsP <- rbind(eco_tax1,eco_tax2,eco_tax3,eco_tax4,eco_tax5, eco_poortax1,eco_poortax2,eco_poortax3,eco_poortax4,eco_poortax5)
+
+#### PLOTS ####
+#comparing the tax model to the interest rate one (with fix w = 1 and fix r = 1)
+ggplot(eco_TvsP, aes(talent,`80`, color=condition)) +
+  geom_point(alpha=0.15,size=0.1) +
+  scale_y_continuous(trans='log10')+
+  facet_grid(~Event_Likelihood)
+```
+
+
